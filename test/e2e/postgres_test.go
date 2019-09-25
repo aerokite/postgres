@@ -2,9 +2,6 @@ package e2e_test
 
 import (
 	"fmt"
-	"os"
-	"strings"
-
 	"github.com/appscode/go/log"
 	"github.com/appscode/go/types"
 	. "github.com/onsi/ginkgo"
@@ -20,8 +17,10 @@ import (
 	"kubedb.dev/apimachinery/client/clientset/versioned/typed/kubedb/v1alpha1/util"
 	"kubedb.dev/postgres/test/e2e/framework"
 	"kubedb.dev/postgres/test/e2e/matcher"
+	"os"
 	stashV1alpha1 "stash.appscode.dev/stash/apis/stash/v1alpha1"
 	stashV1beta1 "stash.appscode.dev/stash/apis/stash/v1beta1"
+	"strings"
 )
 
 const (
@@ -1622,6 +1621,7 @@ var _ = Describe("Postgres", func() {
 				// Create Postgres
 				createAndWaitForRunning()
 
+
 				By("Ping Database")
 				f.EventuallyPingDatabase(postgres.ObjectMeta, dbName, dbUser).Should(BeTrue())
 
@@ -1699,20 +1699,24 @@ var _ = Describe("Postgres", func() {
 				})
 
 				Context("With PVC as Archive backend", func() {
-					var archivePVC *core.PersistentVolumeClaim
+					var firstPVC *core.PersistentVolumeClaim
+					var secondPVC *core.PersistentVolumeClaim
 					BeforeEach(func() {
 						secret = f.SecretForLocalBackend()
-						archivePVC = f.GetPersistentVolumeClaim()
-						err := f.CreatePersistentVolumeClaim(archivePVC)
+						firstPVC = f.GetNamedPersistentVolumeClaim("first")
+						secondPVC = f.GetNamedPersistentVolumeClaim("second")
+						err = f.CreatePersistentVolumeClaim(firstPVC)
+						Expect(err).NotTo(HaveOccurred())
+						err = f.CreatePersistentVolumeClaim(secondPVC)
 						Expect(err).NotTo(HaveOccurred())
 
 						postgres.Spec.Archiver = &api.PostgresArchiverSpec{
 							Storage: &store.Backend{
 								Local: &store.LocalSpec{
-									MountPath: "/repo",
+									MountPath: "/walarchive",
 									VolumeSource: core.VolumeSource{
 										PersistentVolumeClaim: &core.PersistentVolumeClaimVolumeSource{
-											ClaimName: archivePVC.Name,
+											ClaimName: firstPVC.Name,
 										},
 									},
 								},
@@ -1723,10 +1727,10 @@ var _ = Describe("Postgres", func() {
 						postgres2nd.Spec.Archiver = &api.PostgresArchiverSpec{
 							Storage: &store.Backend{
 								Local: &store.LocalSpec{
-									MountPath: "/repo",
+									MountPath: "/walarchive",
 									VolumeSource: core.VolumeSource{
 										PersistentVolumeClaim: &core.PersistentVolumeClaimVolumeSource{
-											ClaimName: archivePVC.Name,
+											ClaimName: secondPVC.Name,
 										},
 									},
 								},
@@ -1736,11 +1740,11 @@ var _ = Describe("Postgres", func() {
 							PostgresWAL: &api.PostgresWALSourceSpec{
 								Backend: store.Backend{
 									Local: &store.LocalSpec{
-										MountPath: "/repo",
+										MountPath: "/walsource",
 										SubPath:   fmt.Sprintf("%s-0", postgres.Name),
 										VolumeSource: core.VolumeSource{
 											PersistentVolumeClaim: &core.PersistentVolumeClaimVolumeSource{
-												ClaimName: archivePVC.Name,
+												ClaimName: firstPVC.Name,
 											},
 										},
 									},
@@ -1753,11 +1757,11 @@ var _ = Describe("Postgres", func() {
 							PostgresWAL: &api.PostgresWALSourceSpec{
 								Backend: store.Backend{
 									Local: &store.LocalSpec{
-										MountPath: "cold/sub0",
+										MountPath: "/final/source",
 										SubPath:   fmt.Sprintf("%s-0", postgres2nd.Name),
 										VolumeSource: core.VolumeSource{
 											PersistentVolumeClaim: &core.PersistentVolumeClaimVolumeSource{
-												ClaimName: archivePVC.Name,
+												ClaimName: secondPVC.Name,
 											},
 										},
 									},
@@ -1766,9 +1770,9 @@ var _ = Describe("Postgres", func() {
 						}
 
 					})
-					Context("Archive and Initialize from wal archive", func() {
-						It("should archive and should resume from archive successfully", archiveAndInitializeFromLocalArchive)
-					})
+
+					It("should archive and should resume from archive successfully", archiveAndInitializeFromLocalArchive)
+
 				})
 			})
 
